@@ -1,0 +1,16 @@
+{
+  "name": "mcp-file-push",
+  "version": "1.0.0",
+  "description": "MCP server for pushing files to remote servers via HTTP or SSH",
+  "main": "mcp-file-push.js",
+  "type": "module",
+  "scripts": {
+    "start": "node mcp-file-push.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "axios": "^1.6.0",
+    "form-data": "^4.0.0",
+    "node-ssh": "^13.0.0"
+  }
+}
