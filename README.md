@@ -151,12 +151,10 @@ sshMCP/
 ```
 
 ## Examples
+<img width="1569" height="512" alt="image" src="https://github.com/user-attachments/assets/84bca1d4-e687-4ae8-afe5-efff30a266c3" />
 
-### Database Operations
-![Database Operations](./screenshots/database-operations.png)
+<img width="1642" height="568" alt="image" src="https://github.com/user-attachments/assets/4d04d69f-edfa-4c6b-b112-748a3478da64" />
 
-### Server Information
-![Server Information](./screenshots/server-info.png)
 
 ## License
 
@@ -166,10 +164,3 @@ MIT
 
 For issues, questions, or contributions, please [open an issue](../../issues) or submit a pull request.
 
-## Changelog
-
-### Version 1.0.0
-- Initial release
-- SSH command execution support
-- File push/pull capabilities
-- Configurable defaults via environment variables
