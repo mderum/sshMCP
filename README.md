@@ -1,6 +1,6 @@
 # sshMCP
 
-A Node.js-based Model Context Protocol (MCP) server that enables Claude/Cline to execute SSH commands remotely on servers. This MCP bridges the gap between Claude's capabilities and your remote infrastructure, allowing for seamless command execution, file operations, and server management.
+A Node.js-based Model Context Protocol (MCP) server that enables Claude/Cline to execute SSH commands remotely on servers. This MCP bridges the gap between Claude's capabilities and your remote infrastructure.
 
 ## Features
 
@@ -150,70 +150,17 @@ sshMCP/
 └── .gitignore           # Git ignore rules
 ```
 
-## Security Considerations
+## Examples
 
-⚠️ **Important Security Notes:**
+### Database Operations
+![Database Operations](./screenshots/database-operations.png)
 
-1. **Never commit private keys** to version control - add to `.gitignore`
-2. **Restrict permissions** on your SSH private key:
-   ```bash
-   chmod 600 /path/to/ssh-key
-   ```
-3. **Use strong passphrases** for SSH keys
-4. **Limit SSH access** using firewall rules and SSH configuration
-5. **Monitor server logs** for unauthorized access attempts
-6. **Use dedicated SSH keys** for automation (consider separate key per service)
-7. **Rotate keys periodically** and update authorized_keys
-
-## Troubleshooting
-
-### Connection Refused
-- Verify the host and port are correct
-- Check if SSH service is running on the remote server
-- Confirm network connectivity with `ping` or `nc`
-
-### Permission Denied (publickey)
-- Ensure your public key is in `~/.ssh/authorized_keys` on the remote server
-- Verify SSH key file permissions are `600`
-- Check that the username matches your SSH key
-
-### Key Not Found
-- Verify the path to your private key is correct
-- Ensure the file exists and is readable
-- Check for typos in environment variable paths
-
-### Timeout Errors
-- Check network connectivity to the remote server
-- Verify firewall rules allow SSH traffic
-- Increase SSH timeout values if needed
-
-## Supported Commands
-
-The MCP can execute any command available in your remote server's shell, including:
-
-- System commands (ls, cd, mkdir, rm, etc.)
-- Package managers (apt, yum, npm, pip, etc.)
-- Development tools (git, docker, etc.)
-- Custom scripts and applications
-- Database clients (psql, mysql, etc.)
-
-## Development
-
-### Install Dependencies
-```bash
-npm install
-```
-
-### Testing
-To test your configuration:
-
-```bash
-ssh -i /path/to/key username@hostname "echo 'Connection successful'"
-```
+### Server Information
+![Server Information](./screenshots/server-info.png)
 
 ## License
 
-[Add your license here]
+MIT
 
 ## Support
 
