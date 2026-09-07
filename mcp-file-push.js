@@ -8,6 +8,10 @@ import fs from "fs";
 import path from "path";
 import axios from "axios";
 import FormData from "form-data";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 const DEFAULT_HOST = process.env.DEFAULT_HOST || "";
 const DEFAULT_PRIVATE_KEY = process.env.DEFAULT_PRIVATE_KEY || "";
@@ -18,6 +22,31 @@ const server = new Server(
   { name: "file-push-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
 );
+
+// Patterns for commands we refuse to run. NOTE: this is a blocklist, not a
+// sandbox — it catches obvious destructive commands (rm, del, formatting,
+// output redirection that could overwrite/truncate files) but can be
+// bypassed by creative workarounds (e.g. invoking an interpreter to delete
+// files, using find -delete, piping through xargs, etc.). Treat this as a
+// safety net for accidental destructive commands, not a security boundary
+// against adversarial input.
+const BLOCKED_PATTERNS = [
+  /\brm\b/i,
+  /\bdel\b/i,
+  /\bdelete\b/i,
+  /\brmdir\b/i,
+  /\bunlink\b/i,
+  /\bshred\b/i,
+  /\bmkfs\b/i,
+  /\bdd\b/i,
+  /\btruncate\b/i,
+  />\s*[^&]/, // output redirection that could overwrite/truncate files
+  /\bformat\b/i,
+];
+
+function isCommandBlocked(command) {
+  return BLOCKED_PATTERNS.some((pattern) => pattern.test(command));
+}
 
 const tools = [
   {
@@ -46,7 +75,7 @@ const tools = [
       required: ["filePath", "serverUrl"],
     },
   },
-    {
+  {
     name: "push_folder_ssh",
     description: "Push an entire folder to a server via SSH recursively",
     inputSchema: {
@@ -120,6 +149,47 @@ const tools = [
       required: ["dirPath"],
     },
   },
+  {
+    name: "execute_command",
+    description:
+      "Execute a shell command locally, or remotely over SSH if host/privateKeyPath are provided. Destructive commands (rm, del, delete, format, output redirection, etc.) are blocked.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description: "Shell command to execute",
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Local working directory to run the command in (local mode only), defaults to current directory",
+        },
+        timeoutMs: {
+          type: "number",
+          description: "Timeout in milliseconds, default 30000",
+        },
+        host: {
+          type: "string",
+          description:
+            "SSH host, example ubuntu@54.123.45.67. If provided (or a default is configured), the command runs remotely via SSH instead of locally.",
+        },
+        remotePath: {
+          type: "string",
+          description: "Remote working directory to run the command in (SSH mode only)",
+        },
+        privateKeyPath: {
+          type: "string",
+          description: "Path to private SSH key (SSH mode only)",
+        },
+        port: {
+          type: "string",
+          description: "SSH port, default is 22 (SSH mode only)",
+        },
+      },
+      required: ["command"],
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -134,7 +204,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "push_file") {
       return await handlePushFileHttp(args);
     }
-	    if (name === "push_folder_ssh") {
+    if (name === "push_folder_ssh") {
       return await handlePushFolderSsh(args);
     }
     if (name === "push_file_ssh") {
@@ -142,6 +212,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (name === "list_files") {
       return await handleListFiles(args);
+    }
+    if (name === "execute_command") {
+      return await handleExecuteCommand(args);
     }
     return {
       content: [{ type: "text", text: "Unknown tool: " + name }],
@@ -380,6 +453,145 @@ async function handlePushFolderSsh(args) {
   } catch (error) {
     return {
       content: [{ type: "text", text: "SSH folder push failed: " + error.message }],
+      isError: true,
+    };
+  }
+}
+
+async function handleExecuteCommand(args) {
+  const command = args.command;
+  const timeoutMs = args.timeoutMs || 30000;
+
+  if (!command || typeof command !== "string") {
+    return {
+      content: [{ type: "text", text: "No command provided" }],
+      isError: true,
+    };
+  }
+
+  if (isCommandBlocked(command)) {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "Blocked: command matched a destructive-operation pattern and was not run.\nCommand: " +
+            command,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const host = args.host || DEFAULT_HOST;
+  const privateKeyPath = args.privateKeyPath || DEFAULT_PRIVATE_KEY;
+
+  // Remote mode: run over SSH if a host/key is given or configured via env defaults.
+  if (host && privateKeyPath) {
+    return await handleExecuteCommandSsh(args, host, privateKeyPath, timeoutMs);
+  }
+
+  // Local mode: fall back to running on this machine.
+  const cwd = args.cwd ? path.resolve(args.cwd) : process.cwd();
+
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      cwd,
+      timeout: timeoutMs,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "Command executed locally.\ncwd: " +
+            cwd +
+            "\n\nstdout:\n" +
+            (stdout || "(empty)") +
+            "\n\nstderr:\n" +
+            (stderr || "(empty)"),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "Command failed locally.\ncwd: " +
+            cwd +
+            "\nError: " +
+            error.message +
+            (error.stdout ? "\n\nstdout:\n" + error.stdout : "") +
+            (error.stderr ? "\n\nstderr:\n" + error.stderr : ""),
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+async function handleExecuteCommandSsh(args, host, privateKeyPath, timeoutMs) {
+  const command = args.command;
+  const remotePath = args.remotePath || DEFAULT_REMOTE_PATH;
+  const port = args.port || DEFAULT_PORT;
+
+  try {
+    const nodeSshModule = await import("node-ssh");
+    const NodeSSH = nodeSshModule.NodeSSH;
+    const ssh = new NodeSSH();
+
+    const resolvedKeyPath = path.resolve(privateKeyPath);
+
+    if (!fs.existsSync(resolvedKeyPath)) {
+      return {
+        content: [{ type: "text", text: "Private key not found: " + resolvedKeyPath }],
+        isError: true,
+      };
+    }
+
+    const atIndex = host.indexOf("@");
+    const username = atIndex >= 0 ? host.substring(0, atIndex) : "root";
+    const hostAddress = atIndex >= 0 ? host.substring(atIndex + 1) : host;
+
+    await ssh.connect({
+      host: hostAddress,
+      username: username,
+      privateKey: fs.readFileSync(resolvedKeyPath, "utf8"),
+      port: parseInt(port, 10),
+    });
+
+    const result = await ssh.execCommand(command, {
+      cwd: remotePath || undefined,
+      execOptions: { timeout: timeoutMs },
+    });
+
+    ssh.dispose();
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "Command executed via SSH on " +
+            host +
+            (remotePath ? " in " + remotePath : "") +
+            "\nExit code: " +
+            result.code +
+            "\n\nstdout:\n" +
+            (result.stdout || "(empty)") +
+            "\n\nstderr:\n" +
+            (result.stderr || "(empty)"),
+        },
+      ],
+      isError: result.code !== 0,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: "SSH command execution failed: " + error.message }],
       isError: true,
     };
   }
